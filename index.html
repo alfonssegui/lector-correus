@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="ca">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f3a5f">
+<title>Lector de correus</title>
+<style>
+  :root {
+    --bg: #f4f6f9; --card: #ffffff; --text: #1b2430; --muted: #5f6b7a;
+    --accent: #1f3a5f; --accent-2: #2f6fb0; --ok: #1e7d4f; --warn: #b3261e;
+    --border: #d9dfe7; --chip: #e8eef6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11161d; --card: #1a212b; --text: #e7ecf2; --muted: #9aa7b6;
+      --accent: #8fb8e8; --accent-2: #6aa3e0; --ok: #5cc493; --warn: #f2867d;
+      --border: #2c3644; --chip: #243042;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 17px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--accent); color: #fff;
+           padding: 14px 16px; display: flex; align-items: center; gap: 10px; }
+  @media (prefers-color-scheme: dark) { header { color: #11161d; } }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  header button { background: transparent; border: 1px solid currentColor; color: inherit;
+                  border-radius: 8px; padding: 6px 10px; font-size: 14px; }
+  main { padding: 16px; max-width: 640px; margin: 0 auto; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+          padding: 16px; margin-bottom: 14px; }
+  h2 { font-size: 17px; margin: 0 0 10px; }
+  label { display: block; font-size: 14px; color: var(--muted); margin: 10px 0 4px; }
+  input[type=text], select, textarea {
+    width: 100%; font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+  textarea { min-height: 120px; resize: vertical; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+         font: inherit; font-weight: 600; border: 0; border-radius: 12px; padding: 12px 16px;
+         background: var(--accent-2); color: #fff; min-height: 48px; }
+  .btn.secondary { background: var(--chip); color: var(--text); }
+  .btn.danger { background: var(--warn); }
+  .btn.ok { background: var(--ok); }
+  .btn:disabled { opacity: .5; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .row > .btn { flex: 1 1 0; }
+  .folder { display: flex; justify-content: space-between; align-items: center; width: 100%;
+            text-align: left; margin-bottom: 8px; }
+  .badge { background: rgba(255,255,255,.25); border-radius: 999px; padding: 2px 10px; font-size: 14px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .meta { font-size: 14px; color: var(--muted); margin-bottom: 6px; }
+  .subject { font-size: 19px; font-weight: 700; margin: 4px 0 10px; }
+  .body { white-space: pre-wrap; max-height: 40vh; overflow: auto; font-size: 16px;
+          border-top: 1px solid var(--border); padding-top: 10px; }
+  .player { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+  .player .btn { padding: 10px 4px; font-size: 22px; }
+  .switch { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 15px; }
+  .toast { position: fixed; left: 16px; right: 16px; bottom: 20px; background: var(--text); color: var(--bg);
+           padding: 12px 14px; border-radius: 12px; text-align: center; display: none; z-index: 20; }
+  .listening { animation: pulse 1.2s infinite; background: var(--warn) !important; }
+  @keyframes pulse { 50% { opacity: .6; } }
+  .hidden { display: none !important; }
+  code { background: var(--chip); padding: 1px 5px; border-radius: 5px; word-break: break-all; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Lector de correus</h1>
+  <button id="btnBack" class="hidden">← Enrere</button>
+  <button id="btnSettings">⚙︎</button>
+</header>
+
+<main>
+  <!-- CONFIGURACIÓ -->
+  <section id="viewSetup" class="hidden">
+    <div class="card">
+      <h2>Configuració inicial</h2>
+      <p class="muted">Aquestes dades te les dona l'administrador del Microsoft 365 quan hagi registrat l'aplicació.</p>
+      <label for="cfgClient">ID de l'aplicació (client)</label>
+      <input type="text" id="cfgClient" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off">
+      <label for="cfgTenant">ID del directori (tenant) o domini</label>
+      <input type="text" id="cfgTenant" placeholder="p. ex. salasconstruhabit.com" autocomplete="off">
+      <label for="cfgPrefix">Les carpetes comencen per…</label>
+      <input type="text" id="cfgPrefix" value="Correus Importants">
+      <p class="muted">Adreça de retorn que cal registrar (tipus «SPA»):<br><code id="redirectShow"></code></p>
+      <div class="row"><button class="btn" id="btnSaveCfg">Desa</button></div>
+    </div>
+  </section>
+
+  <!-- INICI DE SESSIÓ -->
+  <section id="viewLogin" class="hidden">
+    <div class="card">
+      <h2>Entra amb el teu compte de Microsoft</h2>
+      <p class="muted">L'aplicació només llegeix correus i envia les respostes que tu confirmes.</p>
+      <div class="row"><button class="btn" id="btnLogin">Inicia la sessió</button></div>
+    </div>
+  </section>
+
+  <!-- CARPETES -->
+  <section id="viewFolders" class="hidden">
+    <div class="card">
+      <h2>Carpetes</h2>
+      <div id="folderList"><p class="muted">Carregant…</p></div>
+      <button class="btn secondary" id="btnAllFolders" style="width:100%">Mostra totes les carpetes</button>
+    </div>
+    <div class="card">
+      <h2>Opcions</h2>
+      <label class="switch"><input type="checkbox" id="optUnread"> Només els no llegits</label>
+      <label class="switch"><input type="checkbox" id="optAuto" checked> Passa sol al correu següent</label>
+      <label for="optVoice">Veu de lectura</label>
+      <select id="optVoice"></select>
+      <label for="optRate">Velocitat: <span id="rateShow">1.0</span></label>
+      <input type="range" id="optRate" min="0.6" max="1.6" step="0.1" value="1" style="width:100%">
+      <label for="optDictLang">Idioma del dictat</label>
+      <select id="optDictLang">
+        <option value="ca-ES">Català</option>
+        <option value="es-ES">Castellà</option>
+      </select>
+      <p class="muted" style="margin-top:14px">Sessió: <span id="whoami">—</span>
+        · <a href="#" id="lnkLogout">Tanca la sessió</a></p>
+    </div>
+  </section>
+
+  <!-- CORREU -->
+  <section id="viewMail" class="hidden">
+    <div class="card">
+      <div class="meta" id="mailPos"></div>
+      <div class="meta" id="mailFrom"></div>
+      <div class="subject" id="mailSubject"></div>
+      <div class="body" id="mailBody"></div>
+      <div class="player">
+        <button class="btn secondary" id="btnPrev" aria-label="Anterior">⏮</button>
+        <button class="btn" id="btnPlay" aria-label="Llegeix">▶</button>
+        <button class="btn secondary" id="btnStop" aria-label="Atura">⏹</button>
+        <button class="btn secondary" id="btnNext" aria-label="Següent">⏭</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Respondre</h2>
+      <div class="row" style="margin-bottom:10px">
+        <button class="btn" id="btnDictate">🎤 Dicta</button>
+        <button class="btn secondary" id="btnReadBack">🔊 Escolta-la</button>
+      </div>
+      <textarea id="replyText" placeholder="Prem «Dicta» i parla, o escriu aquí…"></textarea>
+      <label class="switch"><input type="checkbox" id="optReplyAll"> Respon a tothom</label>
+      <div class="row" style="margin-top:10px">
+        <button class="btn secondary" id="btnClear">Esborra</button>
+        <button class="btn ok" id="btnSend">Envia…</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ---------- utilitats ----------
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get(k, d = null) { try { const v = localStorage.getItem("lc_" + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem("lc_" + k, JSON.stringify(v)); } catch {} },
+    del(k) { try { localStorage.removeItem("lc_" + k); } catch {} },
+  };
+  const sstore = {
+    get(k) { try { return sessionStorage.getItem("lc_" + k); } catch { return null; } },
+    set(k, v) { try { sessionStorage.setItem("lc_" + k, v); } catch {} },
+    del(k) { try { sessionStorage.removeItem("lc_" + k); } catch {} },
+  };
+  function toast(msg, ms = 3000) {
+    const t = $("toast"); t.textContent = msg; t.style.display = "block";
+    clearTimeout(toast._t); toast._t = setTimeout(() => (t.style.display = "none"), ms);
+  }
+  function show(view) {
+    for (const v of ["viewSetup", "viewLogin", "viewFolders", "viewMail"]) $(v).classList.toggle("hidden", v !== view);
+    $("btnBack").classList.toggle("hidden", view !== "viewMail");
+  }
+  const REDIRECT = location.origin + location.pathname;
+  const SCOPES = "openid profile offline_access User.Read Mail.Read Mail.Send";
+
+  // ---------- configuració ----------
+  let cfg = store.get("cfg", { client: "", tenant: "organizations", prefix: "Correus Importants" });
+  $("redirectShow").textContent = REDIRECT;
+  function fillCfg() { $("cfgClient").value = cfg.client || ""; $("cfgTenant").value = cfg.tenant || ""; $("cfgPrefix").value = cfg.prefix || ""; }
+  $("btnSaveCfg").onclick = () => {
+    cfg = { client: $("cfgClient").value.trim(), tenant: $("cfgTenant").value.trim() || "organizations",
+            prefix: $("cfgPrefix").value.trim() };
+    if (!/^[0-9a-f-]{36}$/i.test(cfg.client)) { toast("L'ID de l'aplicació no sembla correcte"); return; }
+    store.set("cfg", cfg); toast("Desat"); start();
+  };
+  $("btnSettings").onclick = () => { stopSpeech(); fillCfg(); show("viewSetup"); };
+
+  // ---------- autenticació (OAuth 2.0 + PKCE, sense llibreries) ----------
+  const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const randStr = (n = 48) => b64url(crypto.getRandomValues(new Uint8Array(n)));
+  const authBase = () => `https://login.microsoftonline.com/${encodeURIComponent(cfg.tenant)}/oauth2/v2.0`;
+
+  async function login() {
+    const verifier = randStr(64), state = randStr(16);
+    const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+    sstore.set("verifier", verifier); sstore.set("state", state);
+    const p = new URLSearchParams({ client_id: cfg.client, response_type: "code", redirect_uri: REDIRECT,
+      response_mode: "query", scope: SCOPES, code_challenge: challenge, code_challenge_method: "S256",
+      state, prompt: "select_account" });
+    location.assign(`${authBase()}/authorize?${p}`);
+  }
+  async function tokenRequest(params) {
+    const r = await fetch(`${authBase()}/token`, { method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: cfg.client, scope: SCOPES, ...params }) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error_description || j.error || "Error d'autenticació");
+    store.set("tok", { access: j.access_token, refresh: j.refresh_token, exp: Date.now() + (j.expires_in - 120) * 1000 });
+  }
+  async function handleRedirect() {
+    const q = new URLSearchParams(location.search);
+    if (!q.has("code") && !q.has("error")) return;
+    history.replaceState(null, "", REDIRECT);
+    if (q.has("error")) throw new Error(q.get("error_description") || q.get("error"));
+    if (q.get("state") !== sstore.get("state")) throw new Error("La resposta d'inici de sessió no coincideix. Torna-ho a provar.");
+    await tokenRequest({ grant_type: "authorization_code", code: q.get("code"), redirect_uri: REDIRECT,
+                         code_verifier: sstore.get("verifier") || "" });
+    sstore.del("verifier"); sstore.del("state");
+  }
+  async function accessToken() {
+    const t = store.get("tok");
+    if (!t) return null;
+    if (Date.now() < t.exp) return t.access;
+    if (!t.refresh) return null;
+    try { await tokenRequest({ grant_type: "refresh_token", refresh_token: t.refresh }); return store.get("tok").access; }
+    catch { store.del("tok"); return null; }
+  }
+  function logout() { store.del("tok"); stopSpeech(); show("viewLogin"); }
+  $("btnLogin").onclick = () => login().catch((e) => toast(e.message, 5000));
+  $("lnkLogout").onclick = (e) => { e.preventDefault(); logout(); };
+
+  // ---------- Microsoft Graph ----------
+  async function graph(path, opts = {}) {
+    const tok = await accessToken();
+    if (!tok) { logout(); throw new Error("Cal tornar a iniciar la sessió"); }
+    const r = await fetch(path.startsWith("http") ? path : `https://graph.microsoft.com/v1.0${path}`, {
+      ...opts, headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json", ...(opts.headers || {}) } });
+    if (r.status === 401) { store.del("tok"); logout(); throw new Error("La sessió ha caducat"); }
+    if (r.status === 202 || r.status === 204) return null;
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error((j.error && j.error.message) || `Error ${r.status}`);
+    return j;
+  }
+  async function allFolders() {
+    const out = [];
+    async function walk(url, depth, parent) {
+      let next = url;
+      while (next) {
+        const j = await graph(next);
+        for (const f of j.value) {
+          const full = parent ? `${parent} / ${f.displayName}` : f.displayName;
+          out.push({ ...f, full });
+          if (f.childFolderCount > 0 && depth < 5)
+            await walk(`/me/mailFolders/${f.id}/childFolders?$top=100&$select=id,displayName,childFolderCount,unreadItemCount,totalItemCount`, depth + 1, full);
+        }
+        next = j["@odata.nextLink"];
+      }
+    }
+    await walk("/me/mailFolders?$top=100&$select=id,displayName,childFolderCount,unreadItemCount,totalItemCount", 0, "");
+    return out;
+  }
+
+  // ---------- vista de carpetes ----------
+  let folders = [], showAll = false;
+  function renderFolders() {
+    const pref = (cfg.prefix || "").toLocaleLowerCase("ca");
+    const list = showAll || !pref ? folders : folders.filter((f) => f.displayName.toLocaleLowerCase("ca").startsWith(pref));
+    const box = $("folderList"); box.innerHTML = "";
+    if (!list.length) {
+      box.innerHTML = `<p class="muted">No he trobat cap carpeta que comenci per «${escapeHtml(cfg.prefix)}». Prem «Mostra totes les carpetes» per veure com es diuen.</p>`;
+    }
+    for (const f of list) {
+      const b = document.createElement("button");
+      b.className = "btn folder";
+      b.innerHTML = `<span>${escapeHtml(showAll ? f.full : f.displayName)}</span><span class="badge">${f.unreadItemCount} / ${f.totalItemCount}</span>`;
+      b.onclick = () => openFolder(f);
+      box.appendChild(b);
+    }
+    $("btnAllFolders").textContent = showAll ? "Mostra només les importants" : "Mostra totes les carpetes";
+  }
+  $("btnAllFolders").onclick = () => { showAll = !showAll; renderFolders(); };
+  async function loadFolders() {
+    show("viewFolders"); $("title").textContent = "Lector de correus";
+    $("folderList").innerHTML = `<p class="muted">Carregant…</p>`;
+    try {
+      const me = await graph("/me?$select=displayName,mail,userPrincipalName");
+      $("whoami").textContent = me.mail || me.userPrincipalName;
+      folders = await allFolders(); renderFolders();
+    } catch (e) { $("folderList").innerHTML = `<p class="muted">${escapeHtml(e.message)}</p>`; }
+  }
+
+  // ---------- correus ----------
+  let mails = [], idx = 0, curFolder = null;
+  async function openFolder(f) {
+    curFolder = f; $("title").textContent = f.displayName; toast("Carregant correus…", 1500);
+    const filter = $("optUnread").checked ? "&$filter=isRead eq false" : "";
+    try {
+      const j = await graph(`/me/mailFolders/${f.id}/messages?$top=30&$orderby=receivedDateTime desc` +
+        `&$select=id,subject,from,toRecipients,ccRecipients,receivedDateTime,body,isRead${filter}`,
+        { headers: { Prefer: 'outlook.body-content-type="text"' } });
+      mails = j.value || []; idx = 0;
+      if (!mails.length) { toast("No hi ha correus en aquesta carpeta"); return; }
+      show("viewMail"); renderMail(); speakCurrent();
+    } catch (e) { toast(e.message, 5000); }
+  }
+  function cleanBody(t) {
+    if (!t) return "";
+    const cut = t.search(/^\s*(De:|From:|Enviat:|Sent:|-----\s*(Original|Mensaje original|Missatge original)|_{8,}|El .{3,120} (va escriure|escribió):|On .{3,120} wrote:)/im);
+    if (cut > 0) t = t.slice(0, cut);
+    return t.split("\n").filter((l) => !/^\s*>/.test(l)).join("\n")
+            .replace(/https?:\/\/\S+/g, "(enllaç)").replace(/\n{3,}/g, "\n\n").trim();
+  }
+  const fmtDate = (s) => new Date(s).toLocaleString("ca-ES", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+  function renderMail() {
+    const m = mails[idx];
+    $("mailPos").textContent = `${idx + 1} de ${mails.length}${m.isRead ? "" : " · no llegit"}`;
+    const from = m.from && m.from.emailAddress ? m.from.emailAddress : { name: "Desconegut", address: "" };
+    $("mailFrom").textContent = `${from.name} <${from.address}> · ${fmtDate(m.receivedDateTime)}`;
+    $("mailSubject").textContent = m.subject || "(sense assumpte)";
+    $("mailBody").textContent = cleanBody(m.body && m.body.content);
+    $("replyText").value = ""; $("optReplyAll").checked = false;
+  }
+  function mailSpeechText(m) {
+    const from = m.from && m.from.emailAddress ? (m.from.emailAddress.name || m.from.emailAddress.address) : "remitent desconegut";
+    let body = cleanBody(m.body && m.body.content);
+    if (body.length > 2500) body = body.slice(0, 2500) + ". El correu continua; el tens sencer a la pantalla.";
+    return `Correu de ${from}. Assumpte: ${m.subject || "sense assumpte"}. ${body}`;
+  }
+  $("btnPrev").onclick = () => { if (idx > 0) { idx--; renderMail(); speakCurrent(); } };
+  $("btnNext").onclick = () => nextMail();
+  function nextMail() {
+    if (idx < mails.length - 1) { idx++; renderMail(); speakCurrent(); }
+    else { stopSpeech(); speak("No hi ha més correus en aquesta carpeta."); }
+  }
+  $("btnBack").onclick = () => { stopSpeech(); stopDictation(); loadFolders(); };
+
+  // ---------- veu: lectura ----------
+  const synth = window.speechSynthesis;
+  let voices = [], queue = [], qPos = 0, speaking = false, onQueueEnd = null;
+  function loadVoices() {
+    if (!synth) return;
+    voices = synth.getVoices().filter((v) => /^(ca|es|en)/i.test(v.lang));
+    const sel = $("optVoice"), saved = store.get("voice");
+    sel.innerHTML = "";
+    for (const v of voices) { const o = document.createElement("option"); o.value = v.voiceURI; o.textContent = `${v.name} (${v.lang})`; sel.appendChild(o); }
+    const pick = voices.find((v) => v.voiceURI === saved) || voices.find((v) => /^ca/i.test(v.lang)) || voices.find((v) => /^es/i.test(v.lang));
+    if (pick) sel.value = pick.voiceURI;
+  }
+  if (synth) { loadVoices(); synth.onvoiceschanged = loadVoices; }
+  $("optVoice").onchange = () => store.set("voice", $("optVoice").value);
+  $("optRate").value = store.get("rate", 1); $("rateShow").textContent = Number($("optRate").value).toFixed(1);
+  $("optRate").oninput = () => { $("rateShow").textContent = Number($("optRate").value).toFixed(1); store.set("rate", Number($("optRate").value)); };
+  for (const id of ["optUnread", "optAuto"]) { const s = store.get(id); if (s !== null) $(id).checked = s; $(id).onchange = () => store.set(id, $(id).checked); }
+  $("optDictLang").value = store.get("dictLang", "ca-ES"); $("optDictLang").onchange = () => store.set("dictLang", $("optDictLang").value);
+
+  function chunk(text) {
+    // Android Chrome talla els textos llargs: es llegeix per frases curtes.
+    const parts = text.replace(/\s+/g, " ").match(/[^.!?;:\n]+[.!?;:]?/g) || [text];
+    const out = []; let cur = "";
+    for (const p of parts) { if ((cur + p).length > 220 && cur) { out.push(cur.trim()); cur = p; } else cur += p; }
+    if (cur.trim()) out.push(cur.trim());
+    return out;
+  }
+  function speakChunk() {
+    if (qPos >= queue.length) { speaking = false; setPlayIcon(); const cb = onQueueEnd; onQueueEnd = null; if (cb) cb(); return; }
+    const u = new SpeechSynthesisUtterance(queue[qPos]);
+    const v = voices.find((x) => x.voiceURI === $("optVoice").value);
+    if (v) { u.voice = v; u.lang = v.lang; } else u.lang = "ca-ES";
+    u.rate = Number($("optRate").value);
+    u.onend = () => { if (speaking) { qPos++; speakChunk(); } };
+    u.onerror = () => { if (speaking) { qPos++; speakChunk(); } };
+    synth.speak(u);
+  }
+  function speak(text, then = null) {
+    if (!synth) { toast("Aquest navegador no pot llegir en veu alta"); return; }
+    stopSpeech(); queue = chunk(text); qPos = 0; speaking = true; onQueueEnd = then; setPlayIcon(); speakChunk();
+  }
+  function stopSpeech() { speaking = false; onQueueEnd = null; if (synth) synth.cancel(); setPlayIcon(); }
+  function setPlayIcon() { $("btnPlay").textContent = speaking ? "⏸" : "▶"; }
+  function speakCurrent() {
+    speak(mailSpeechText(mails[idx]), () => { if ($("optAuto").checked && idx < mails.length - 1) setTimeout(nextMail, 800); });
+  }
+  $("btnPlay").onclick = () => {
+    if (speaking) { const keep = qPos, cb = onQueueEnd; stopSpeech(); qPos = keep; onQueueEnd = cb; $("btnPlay").dataset.paused = "1"; return; }
+    if ($("btnPlay").dataset.paused === "1" && queue.length && qPos < queue.length) {   // continua on s'havia aturat
+      delete $("btnPlay").dataset.paused; speaking = true; setPlayIcon(); speakChunk(); return;
+    }
+    speakCurrent();
+  };
+  $("btnStop").onclick = () => { delete $("btnPlay").dataset.paused; stopSpeech(); };
+
+  // ---------- veu: dictat ----------
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null, wantListen = false, baseText = "";
+  function startDictation() {
+    if (!SR) { toast("El dictat no funciona en aquest navegador. Fes servir Chrome o el micròfon del teclat."); return; }
+    stopSpeech(); wantListen = true;
+    baseText = $("replyText").value ? $("replyText").value.trimEnd() + " " : "";
+    rec = new SR(); rec.lang = $("optDictLang").value; rec.continuous = true; rec.interimResults = true;
+    rec.onresult = (e) => {
+      let finalT = "", interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i]; if (r.isFinal) finalT += r[0].transcript; else interim += r[0].transcript;
+      }
+      if (finalT) baseText += finalT.trim() + " ";
+      $("replyText").value = (baseText + interim).replace(/\s+/g, " ").trimStart();
+    };
+    rec.onerror = (e) => { if (e.error === "not-allowed") { wantListen = false; toast("Cal donar permís al micròfon"); } };
+    rec.onend = () => { if (wantListen) { try { rec.start(); } catch { stopDictation(); } } else setDictIcon(); };
+    try { rec.start(); } catch {}
+    setDictIcon();
+  }
+  function stopDictation() { wantListen = false; if (rec) { try { rec.stop(); } catch {} } setDictIcon(); }
+  function setDictIcon() {
+    const b = $("btnDictate"); b.textContent = wantListen ? "⏹ Para de dictar" : "🎤 Dicta"; b.classList.toggle("listening", wantListen);
+  }
+  $("btnDictate").onclick = () => (wantListen ? stopDictation() : startDictation());
+  $("btnReadBack").onclick = () => {
+    stopDictation(); const t = $("replyText").value.trim();
+    if (!t) { toast("Encara no hi ha resposta"); return; }
+    speak("La teva resposta diu: " + t);
+  };
+  $("btnClear").onclick = () => { stopDictation(); $("replyText").value = ""; };
+
+  // ---------- enviar resposta ----------
+  $("btnSend").onclick = async () => {
+    stopDictation(); stopSpeech();
+    const text = $("replyText").value.trim(), m = mails[idx];
+    if (!text) { toast("La resposta és buida"); return; }
+    const all = $("optReplyAll").checked;
+    const to = m.from && m.from.emailAddress ? m.from.emailAddress.address : "?";
+    const extra = all ? ` i a ${((m.toRecipients || []).length + (m.ccRecipients || []).length)} destinataris més` : "";
+    if (!confirm(`Enviar aquesta resposta a ${to}${extra}?\n\nAssumpte: RE: ${m.subject || ""}\n\n${text}`)) { toast("No s'ha enviat"); return; }
+    $("btnSend").disabled = true;
+    try {
+      await graph(`/me/messages/${m.id}/${all ? "replyAll" : "reply"}`, { method: "POST", body: JSON.stringify({ comment: text }) });
+      $("replyText").value = ""; toast("Resposta enviada ✓"); speak("Resposta enviada.");
+    } catch (e) { toast("No s'ha pogut enviar: " + e.message, 6000); }
+    finally { $("btnSend").disabled = false; }
+  };
+
+  function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+  // ---------- arrencada ----------
+  async function start() {
+    if (!cfg.client) { fillCfg(); show("viewSetup"); return; }
+    try { await handleRedirect(); } catch (e) { toast(e.message, 6000); }
+    if (await accessToken()) loadFolders(); else show("viewLogin");
+  }
+  start();
+})();
+</script>
+</body>
+</html>
